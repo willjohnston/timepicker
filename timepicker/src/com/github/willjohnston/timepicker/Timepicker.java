@@ -11,7 +11,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class Timepicker {
-	private static final String RELATIVE_REGEX = "(([+\\-]\\d+)([hdwmy]))?(@([hdmy]|w([0-7])?))?(([+\\-]\\d+)([hdwmy]))?(/(NY|LN|BD|IN|SG|HK|SH|SE|TK|SY|UTC))?";
+	private static final String RELATIVE_REGEX = "(([+\\-]\\d+)([hdwmy]))?(@([hdmy]|w([0-7])?))?(([+\\-]\\d+)([hdwmy]))?";
 	private static final Pattern patternRelative = Pattern.compile(RELATIVE_REGEX);
 
 	private static final Map<String, TimeZone> TZ_MAP = new HashMap<String, TimeZone>();
@@ -24,29 +24,16 @@ public class Timepicker {
 		TZ_MAP.put("SG", TimeZone.getTimeZone("Asia/Singapore"));
 		TZ_MAP.put("SH", TimeZone.getTimeZone("Asia/Shanghai"));
 		TZ_MAP.put("HK", TimeZone.getTimeZone("Asia/Hong_Kong"));
-		TZ_MAP.put("SE", TimeZone.getTimeZone("Asia/Seoul"));
-		TZ_MAP.put("TK", TimeZone.getTimeZone("Japan"));
+		TZ_MAP.put("TK", TimeZone.getTimeZone("Asia/Tokyo"));
 		TZ_MAP.put("SY", TimeZone.getTimeZone("Australia/Sydney"));
 	}
-
-	// don't forget case-insensitive
 
 	private long now;
 
 	public Timepicker() {
 		this.now = 0;
-
-		// for (TimeZone tz : TZ_MAP.values()) {
-		// System.out.println(tz.getID());
-		// }
-		// for (String id : TimeZone.getAvailableIDs(540 * 60 * 1000)) {
-		// System.out.println(id);
-		// }
-
 	}
-
-	// relative times use the provided "now" - if that's not provided, use the
-	// parse time
+	
 	public Timepicker(long now) {
 		this.now = now;
 	}
@@ -55,57 +42,43 @@ public class Timepicker {
 		this.now = now.getTime();
 	}
 
-	public Date parse(String input) {
-		return parse(input, 0);
-	}
-
-	public int getAdjustmentUnit(String unit) {
-		switch (unit) {
-		case "y":
-			return Calendar.YEAR;
-		case "m":
-			return Calendar.MONTH;
-		case "w":
-			return Calendar.WEEK_OF_YEAR;
-		case "d":
-			return Calendar.DATE;
-		case "h":
-			return Calendar.HOUR;
-		default:
-			throw new IllegalArgumentException("unknown time adjustment unit: " + unit);
-		}
-	}
-
 	private long getNow() {
 		return now > 0 ? now : System.currentTimeMillis();
 	}
 
-	public Date parse(String input, long defaultOffset) {
-		Matcher relative = patternRelative.matcher(input);
-		if (relative.matches()) {
-			String msg = String.format("MATCH [%s]: ", input);
-			msg += String.format(" tz [%s]", relative.group(11));
-			msg += String.format(" pre [%s,%s]", relative.group(2), relative.group(3));
-			msg += String.format(" roll [%s|%s]", relative.group(5), relative.group(6));
-			msg += String.format(" post [%s,%s]", relative.group(8), relative.group(9));
-			// System.out.println(msg);
+	public Date parse(String input) {
+		return parse(input, TimeZone.getDefault().getRawOffset()/60000);
+	}
 
-			// create the calendar, set it to now or the provided "now"
-			Calendar cal = Calendar.getInstance();
-			cal.setTimeInMillis(getNow());
+	public Date parse(String input, long offsetMinutes) {
+		// first get the timezone, either directly from the input or calculated from offsetMinutes
+		TimeZone tz;
+		Pattern tzPattern = Pattern.compile("(.*),(\\S+)");
+		Matcher tzMatcher = tzPattern.matcher(input);
+		if (tzMatcher.matches()) {
+			input = tzMatcher.group(1);
+			String tzString = tzMatcher.group(2);
 
-			// set the TZ
-			String tzString = relative.group(11);
-			if (tzString == null) {
-				// for now, we just use current TZ, but will need to lookup a TZ
-				// using defaultOffset and comparing to TZ_MAP values
-			} else if (TZ_MAP.containsKey(tzString)) {
-				TimeZone tz = TZ_MAP.get(tzString);
-				cal.setTimeZone(tz);
-			} else {
-				throw new IllegalArgumentException("unknown timezone: " + tzString);
+			tz = TZ_MAP.get(tzString);
+
+			if (tz == null) {
+				tz = TimeZone.getTimeZone(tzString);
 			}
 
+			if ("GMT".equals(tz.getID()) && !"GMT".equals(tzString)) {
+				throw new IllegalArgumentException("unknown timezone: " + tzString);				
+			}
+		} else {
+			tz = offsetMinToTimeZone(offsetMinutes);			
+		}
+
+		// create the calendar
+		Calendar cal = Calendar.getInstance(tz);
+		cal.setTimeInMillis(getNow());
+		
+		Matcher relative = patternRelative.matcher(input);
+		if (relative.matches()) {
+			
 			if (relative.group(2) != null) {
 				// pre-adjust the time
 				int preAdjustAmount = Integer.parseInt(relative.group(2));
@@ -158,6 +131,7 @@ public class Timepicker {
 		} else if (input.matches("\\d{4}-\\d{2}-\\d{2}:\\d{2}:\\d{2}")) {
 			try {
 				SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH:mm");
+				sdf.setTimeZone(tz);
 				return sdf.parse(input);
 			} catch (ParseException e) {
 				throw new IllegalArgumentException(e);
@@ -165,12 +139,62 @@ public class Timepicker {
 		} else if (input.matches("\\d{4}-\\d{2}-\\d{2}")) {
 			try {
 				SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+				sdf.setTimeZone(tz);
 				return sdf.parse(input);
 			} catch (ParseException e) {
 				throw new IllegalArgumentException(e);
 			}
 		} else {
 			throw new IllegalArgumentException(input);
+		}
+	}
+	
+	public static TimeZone offsetMinToTimeZone(long offsetMin) {
+		// look for TZ id's that match offset
+		String[] idList = TimeZone.getAvailableIDs((int)(offsetMin * 60 * 1000));
+		for (String id : idList) {
+			// if some found, look for one that is found in TZ_MAP
+			//   - use it
+			for (TimeZone tz : TZ_MAP.values()) {
+				if (id.equals(tz.getID())) {
+					return tz;
+				}
+			}
+		}
+
+		//   - otherwise use the one that starts with Etc
+		for (String id : idList) {
+			if (id.matches("^Etc.+")) {
+				return TimeZone.getTimeZone(id);
+			}
+		}
+		
+		//   - otherwise the first in the list
+		if (idList.length > 0) {
+			return TimeZone.getTimeZone(idList[0]);
+		}
+
+		String gmtFormat = String.format("GMT%s%02d%02d", (offsetMin < 0 ? "-" : "+"), Math.abs(offsetMin/60), Math.abs(offsetMin%60));
+		TimeZone tz = TimeZone.getTimeZone(gmtFormat);
+		if (tz != null) return tz;
+		
+		throw new IllegalArgumentException("can't find or construct TimeZone for offset: " + offsetMin);
+	}
+
+	private int getAdjustmentUnit(String unit) {
+		switch (unit) {
+		case "y":
+			return Calendar.YEAR;
+		case "m":
+			return Calendar.MONTH;
+		case "w":
+			return Calendar.WEEK_OF_YEAR;
+		case "d":
+			return Calendar.DATE;
+		case "h":
+			return Calendar.HOUR;
+		default:
+			throw new IllegalArgumentException("unknown time adjustment unit: " + unit);
 		}
 	}
 }
