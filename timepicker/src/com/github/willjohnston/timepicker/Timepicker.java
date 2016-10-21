@@ -10,6 +10,68 @@ import java.util.TimeZone;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+/*
+ * timezone:
+ * determined from browser offset time if missing
+ * ,(NY|LN|TK|HK)
+ * ,America/Chicago
+ * 
+ * start:
+ * NOW or T (or NOW is implied if missing)
+ * 2014-11-14
+ * 2014-06-05,13:45
+ * 
+ * adjustment/rounding = any number of these, chained together:
+ * +/- h, d, w, m, y
+ * @h, @d, @w, @m, @y OR @sat, @sun, @mon, @tue, @wed, @thr, @fri
+ * 
+ * examples:
+ * 
+ * 2015-02-04
+ * timezone: not specified, implied from current location or browser
+ * start time: calculated from string
+ * adjustment period: none
+ * 
+ * 2015-02-04,12:34,JST
+ * timezone: JST
+ * start time: calculated from string
+ * adjustment period: none
+ * 
+ * +1d,JST
+ * timezone: JST (but not needed)
+ * start time: now
+ * adjustment period: +1d
+ * 
+ * @m+1d,EST
+ * timezone: EST
+ * start time: now
+ * adjustment: round down to start of month in EST
+ * 
+ * 
+ * UserMangler, InMangler, TimeMangler implement Mangler
+ *   public String mangle(String queryString)
+ * 
+ * step 0: find comparisons and timeStrings - (\S+)\s+((BEFORE|AFTER)\s+(\S+)|(\S+)\s+TO\s+(\S+)), substitute them
+ *   queryString = timeMangler.mangle(queryString, browserOffset);
+ * 
+ * 
+ * step 1: find timezone (either in string or determined from browser offset)
+ *   TimeZoneFinder timeZoneFinder = new TimeZoneFinder(timeString, browserOffset);
+ *   timeString = timeZoneFinder.getRemainingString();
+ *   TimeZone timeZone = timeZoneFinder.getTimeZone();
+ * 
+ * step 2: find starttime (either now, or in string and using timezone)
+ *   StartTimeFinder startTimeFinder = new StartTimeFinder(timeString, timeZone);
+ *   timeString = startTimeFinder.getRemainingString();
+ *   long startTime = startTimeFinder.getTime();
+ * 
+ * step 3: apply adjustments (to startime, using timezone for period rounding)
+ *   TimeAdjuster timeAdjuster = new TimeAdjuster(startTime, timeZone);
+ *   long adjustedTime = timeAdjuster.getAdjustedTime(timeString);
+ * 
+ */
+
+
 public class Timepicker {
 	private static final String RELATIVE_REGEX = "(([+\\-]\\d+)([hdwmy]))?(@([hdmy]|w([0-7])?))?(([+\\-]\\d+)([hdwmy]))?";
 	private static final Pattern patternRelative = Pattern.compile(RELATIVE_REGEX);

@@ -22,14 +22,14 @@ public class TimepickerTest {
 //		tp.parse("-1h");		
 	}
 
-//	@Test
+	@Test
 	public void getIds() {
 		for (String id : TimeZone.getAvailableIDs()) {
 			System.out.println(id + " -> " + TimeZone.getTimeZone(id));
 		}		
 	}
 
-	@Test
+//	@Test
 	public void getIds2() {
 		Timepicker tp = new Timepicker(new Date());
 		tp.parse("@d",0);
